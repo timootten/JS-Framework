@@ -1,0 +1,28 @@
+<script src="/lib/client/stateManager.js"></script>
+
+<script defer>
+  let count1 = state(0);
+  let count2 = state(10);
+
+  let test = state("Test");
+</script>
+
+<span>Count1: {count1} | Count2: {count2}</span>
+<span>2. Count1: {count1} | Count2: {count2}</span>
+
+<button onclick="count1.value += 10;">Increment Count1</button>
+<button onclick="count2.value += 10;">Increment Count2</button>
+
+<div>
+  <h1>{test}</h1>
+  <input type="text" oninput="test.value = this.value" />
+  <input type="text" oninput="test.value = this.value" />
+  <input type="text" oninput="test.value = this.value" />
+  <input type="text" oninput="test.value = this.value" />
+</div>
+
+<button
+  onclick="console.log('Direct', count2.value); console.log('Map', states.get(1));"
+>
+  Log Values of Count2
+</button>
