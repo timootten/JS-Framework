@@ -1,28 +1,40 @@
 <script src="/lib/client/stateManager.js"></script>
 
-<script defer>
-  let count1 = state(0);
-  let count2 = state(10);
+<script defer type="module">
+  let count1 = state(0); // count1
+  let count2 = state(10); // count2
 
-  let test = state("Test");
+  let test = state("Test"); // test
+
+  console.log("Initial Values", statePaths);
+
+  let hello = state({ name: "Hello World", int: 10, obj: { number: 64 } });
 </script>
 
 <span>Count1: {count1} | Count2: {count2}</span>
 <span>2. Count1: {count1} | Count2: {count2}</span>
 
-<button onclick="count1.value += 10;">Increment Count1</button>
-<button onclick="count2.value += 10;">Increment Count2</button>
+<button onclick="count1 += 10;">Increment Count1</button>
+<button onclick="count2 += 10;">Increment Count2</button>
 
 <div>
   <h1>{test}</h1>
-  <input type="text" oninput="test.value = this.value" />
-  <input type="text" oninput="test.value = this.value" />
-  <input type="text" oninput="test.value = this.value" />
-  <input type="text" oninput="test.value = this.value" />
+  <h1>2. {test}</h1>
+  <input type="text" oninput="test = this.value" value="{test}" />
+  <input type="text" oninput="test = this.value" value="{test}" />
 </div>
 
-<button
-  onclick="console.log('Direct', count2.value); console.log('Map', states.get(1));"
->
-  Log Values of Count2
-</button>
+<div>
+  <h1>{hello.int}</h1>
+  <h1>{hello.name}</h1>
+  <h1>{hello.obj.number}</h1>
+  <input
+    type="text"
+    oninput="hello.obj.number = this.value"
+    value="{hello.obj.number}"
+  />
+</div>
+
+<button onclick="console.log('Direct', count2);">Log Values of Count2</button>
+
+<button onclick="console.log('hello', hello);">Log Values of abc</button>

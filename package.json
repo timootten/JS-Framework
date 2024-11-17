@@ -2,6 +2,9 @@
   "name": "own-framework",
   "module": "index.ts",
   "type": "module",
+  "scripts": {
+    "dev": "NODE_ENV=development bun --hot run ."
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
