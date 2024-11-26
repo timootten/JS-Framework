@@ -5,7 +5,6 @@ import { parse, HTMLElement } from 'node-html-parser';
 import * as acorn from 'acorn';
 import * as walk from 'acorn-walk';
 import { getXPath, parseObjectExpression } from "./utils";
-import { generate } from "astring";
 
 const liveReload = makeLiveReloadMiddleware({ watchdirs: ['./'] });
 
@@ -125,24 +124,11 @@ const updateHTMLFile = (html: string) => {
 
   updateUIStates2(dom, uniqueStatePaths, states);
 
-  const escapeString = (str: string): string => {
-    return str.replace(/\\/g, '\\\\')
-      .replace(/"/g, '\\"')
-      .replace(/\n/g, '\\n')
-      .replace(/\r/g, '\\r')
-      .replace(/\t/g, '\\t');
-  };
 
-  const statePathsString = JSON.stringify(statePaths, (key, value) => {
-    if (typeof value === 'string') {
-      return escapeString(value);
-    }
-    return value;
-  });
 
   const statesPathScript = `
     <script>
-      const statePaths = JSON.parse('${statePathsString}');
+      const statePaths = JSON.parse('${JSON.stringify(statePaths)}');
     </script>
     `;
 
@@ -150,41 +136,15 @@ const updateHTMLFile = (html: string) => {
 };
 
 function updateUIStates2(dom: HTMLElement, paths: Path[], states: State[]) {
+  console.log(paths);
 
   for (let i = 0; i < paths.length; i++) {
     const path = paths[i];
     const element = getElementByXPath(dom, path.location);
     if (!element) continue;
-    const jsContents = extractPlaceholders(path.value);
-
-    const results: any[] = [];
-
-    for (let i = 0; i < jsContents.length; i++) {
-      const jsContent = jsContents[i];
-      const executableJS = replacePlaceholder(jsContent, states);
-      const result = eval(executableJS);
-      results.push(result);
-    }
-
-    const value = replacePlaceholdersWithArrayValues(path.value, results);
-
-    if (path.type === "TEXT") {
-      element.textContent = value || '';
-    } else if (path.type === "ATTRIBUTE") {
-      element.setAttribute(path.attributeName, value || '');
-    }
+    const jsContent = extractPlaceholders(path.value);
+    console.log(jsContent)
   }
-}
-
-function replacePlaceholdersWithArrayValues(content: string, values: any[]): string | undefined {
-  let index = 0;
-  return content.replace(/{[^{}]+}/g, () => {
-    if (index < values.length) {
-      const value = values[index++];
-      return value !== undefined ? value : '';
-    }
-    return '';
-  });
 }
 
 function extractPlaceholders(content: string): string[] {
@@ -197,63 +157,15 @@ function extractPlaceholders(content: string): string[] {
   return matches;
 }
 
-const replacePlaceholder = (value: string, states: State[]): string => {
-  const ast = acorn.parse(value, { ecmaVersion: 2020, sourceType: 'module' });
-
-
-  walk.ancestor(ast, {
-    Identifier(node, _, ancestors) {
-      const state = states.find(s => s.name === node.name);
-      if (state) {
-
-
-        const properties: string[] = [];
-
-        for (let i = ancestors.length - 2; i >= 0; i--) {
-          const ancestor = ancestors[i];
-          if (ancestor.type !== "MemberExpression") break;
-          const value = (ancestor as any).property.name;
-          if (value)
-            properties.push(value);
-        }
-
-
-        let value = state.value;
-        for (let i = 0; i < properties.length; i++) {
-          const property = properties[i];
-          value = value[property];
-        }
-
-        (node as any).raw = JSON.stringify(value);
-        (node as any).value = properties.length;
-        (node as any).type = 'Literal';
-      }
-    },
-    MemberExpression(node, state, ancestors) {
-      if (node.type === "MemberExpression") {
-        let propertyCount = 1;
-
-        //check if node.check is a member expression if so add 1 to property count and check again in a loop until it is a literal and then console log the raw from the literal
-        let currentNode = node;
-        while (currentNode.object.type === "MemberExpression") {
-          propertyCount++;
-          currentNode = currentNode.object;
-        }
-
-        if (currentNode.object.type !== "Literal" || currentNode.object?.value !== propertyCount) return;
-
-        let value = currentNode.object?.raw;
-
-        (node as any).type = 'Literal';
-        (node as any).value = value;
-        (node as any).raw = value;
-        (node as any).object = undefined;
-        (node as any).property = undefined;
-      }
-    }
+const replacePlaceholder = (value: string, states: State[]) => {
+  return value.replace(/{(\w+(?:\.\w+|\['\w+'\])*)}/g, (match, name: string) => {
+    const [state, ...properties] = name.split(/\.|\['|'\]/).filter(Boolean);
+    let stateObj = states.find(s => s.name === state)?.value;
+    properties.forEach(prop => {
+      stateObj = stateObj?.[prop];
+    });
+    return stateObj;
   });
-
-  return generate(ast);
 };
 
 
@@ -265,7 +177,7 @@ function getStatePaths(dom: HTMLElement, states: State[]): StatePath[] {
 
       // Check text content
       element.childNodes.forEach(child => {
-        if (child.nodeType === 3 && child.textContent?.match(/{[^{}]+}/g)) {
+        if (child.nodeType === 3 && child.textContent?.match(/{\w+(?:\.\w+|\['\w+'\])*}/g)) {
           containsState = true;
         }
       });
@@ -273,7 +185,7 @@ function getStatePaths(dom: HTMLElement, states: State[]): StatePath[] {
       // Check attributes
       if (!containsState) {
         for (const attrName in element.attributes) {
-          if (element.attributes[attrName].match(/{[^{}]+}/g)) {
+          if (element.attributes[attrName].match(/{\w+(?:\.\w+|\['\w+'\])*}/g)) {
             containsState = true;
             break;
           }
@@ -291,49 +203,25 @@ function getStatePaths(dom: HTMLElement, states: State[]): StatePath[] {
 
     // Check for text content containing the state placeholder
     const textValue = element.innerHTML;
-    const textMatches = textValue.match(/{[^{}]+}/g);
+    const textMatches = textValue.match(/{\w+(?:\.\w+|\['\w+'\])*}/g);
 
     if (textMatches) {
       for (let j = 0; j < textMatches.length; j++) {
         const match = textMatches[j];
-        const stateNames = extractStateNames(match.slice(1, -1)); // Remove the curly braces and extract state names
-
-        let validStateFound = false;
-        stateNames.forEach(stateName => {
-          const state = stateName.split(/\.|\['|'\]/)[0];
-          const stateIndex = states.findIndex(s => s.name === state);
-          if (stateIndex !== -1) {
-            validStateFound = true;
-            let statePath = statePaths.find(sp => sp.name === state);
-            if (!statePath) {
-              statePath = {
-                id: stateIndex,
-                name: state,
-                paths: []
-              };
-              statePaths.push(statePath);
-            }
-            const existingPath = statePath.paths.find(p => p.location === location && p.type === "TEXT");
-            if (!existingPath) {
-              statePath.paths.push({ location, value: textValue, type: "TEXT" });
-            }
-          }
-        });
-
-        if (!validStateFound) {
-          let statePath = statePaths.find(sp => sp.name === 'NONE');
-          if (!statePath) {
-            statePath = {
-              id: -1,
-              name: 'NONE',
-              paths: []
-            };
-            statePaths.push(statePath);
-          }
-          const existingPath = statePath.paths.find(p => p.location === location && p.type === "TEXT");
-          if (!existingPath) {
-            statePath.paths.push({ location, value: textValue, type: "TEXT" });
-          }
+        const stateName = match.slice(1, -1); // Remove the curly braces
+        const state = stateName.split(/\.|\['|'\]/)[0];
+        let statePath = statePaths.find(sp => sp.name === state);
+        if (!statePath) {
+          statePath = {
+            id: states.findIndex(s => s.name === state),
+            name: state,
+            paths: []
+          };
+          statePaths.push(statePath);
+        }
+        const existingPath = statePath.paths.find(p => p.location === location && p.type === "TEXT");
+        if (!existingPath) {
+          statePath.paths.push({ location, value: textValue, type: "TEXT" });
         }
       }
     }
@@ -341,48 +229,24 @@ function getStatePaths(dom: HTMLElement, states: State[]): StatePath[] {
     // Check for attributes containing the state placeholder
     for (const attrName in element.attributes) {
       const attrValue = element.attributes[attrName];
-      const attrMatches = attrValue.match(/{[^{}]+}/g);
+      const attrMatches = attrValue.match(/{\w+(?:\.\w+|\['\w+'\])*}/g);
       if (attrMatches) {
         for (let j = 0; j < attrMatches.length; j++) {
           const match = attrMatches[j];
-          const stateNames = extractStateNames(match.slice(1, -1)); // Remove the curly braces and extract state names
-
-          let validStateFound = false;
-          stateNames.forEach(stateName => {
-            const state = stateName.split(/\.|\['|'\]/)[0];
-            const stateIndex = states.findIndex(s => s.name === state);
-            if (stateIndex !== -1) {
-              validStateFound = true;
-              let statePath = statePaths.find(sp => sp.name === state);
-              if (!statePath) {
-                statePath = {
-                  id: stateIndex,
-                  name: state,
-                  paths: []
-                };
-                statePaths.push(statePath);
-              }
-              const existingPath = statePath.paths.find(p => p.location === location && p.type === "ATTRIBUTE" && p.attributeName === attrName);
-              if (!existingPath) {
-                statePath.paths.push({ location, value: attrValue, type: "ATTRIBUTE", attributeName: attrName });
-              }
-            }
-          });
-
-          if (!validStateFound) {
-            let statePath = statePaths.find(sp => sp.name === 'NONE');
-            if (!statePath) {
-              statePath = {
-                id: -1,
-                name: 'NONE',
-                paths: []
-              };
-              statePaths.push(statePath);
-            }
-            const existingPath = statePath.paths.find(p => p.location === location && p.type === "ATTRIBUTE" && p.attributeName === attrName);
-            if (!existingPath) {
-              statePath.paths.push({ location, value: attrValue, type: "ATTRIBUTE", attributeName: attrName });
-            }
+          const stateName = match.slice(1, -1); // Remove the curly braces
+          const state = stateName.split(/\.|\['|'\]/)[0];
+          let statePath = statePaths.find(sp => sp.name === state);
+          if (!statePath) {
+            statePath = {
+              id: states.findIndex(s => s.name === state),
+              name: state,
+              paths: []
+            };
+            statePaths.push(statePath);
+          }
+          const existingPath = statePath.paths.find(p => p.location === location && p.type === "ATTRIBUTE" && p.attributeName === attrName);
+          if (!existingPath) {
+            statePath.paths.push({ location, value: attrValue, type: "ATTRIBUTE", attributeName: attrName });
           }
         }
       }
@@ -390,16 +254,6 @@ function getStatePaths(dom: HTMLElement, states: State[]): StatePath[] {
   }
 
   return statePaths;
-}
-
-function extractStateNames(content: string): string[] {
-  const regex = /\b\w+\b/g;
-  const matches = [];
-  let match;
-  while ((match = regex.exec(content)) !== null) {
-    matches.push(match[0]);
-  }
-  return matches.length > 0 ? matches : ['NONE'];
 }
 
 const getElementByXPath = (dom: HTMLElement, xPath: string) => {
